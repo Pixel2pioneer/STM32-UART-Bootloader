@@ -34,7 +34,14 @@ typedef void (*pFunction)(void);
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
+#define BOOT_START_BYTE    0xAA
 
+#define CMD_GET_VERSION    0x01
+#define CMD_GET_STATUS     0x02
+#define CMD_GET_APP_INFO   0x03
+#define CMD_START_UPDATE   0x04
+
+#define MAX_PAYLOAD_SIZE   255
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -75,7 +82,11 @@ uint8_t IsApplicationValid(void)
 UART_HandleTypeDef huart3;
 
 /* USER CODE BEGIN PV */
-uint8_t rxData;
+uint8_t rxBuffer[MAX_PAYLOAD_SIZE];
+
+uint8_t startByte;
+uint8_t commandID;
+uint8_t payloadLength;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -85,6 +96,8 @@ static void MX_USART3_UART_Init(void);
 /* USER CODE BEGIN PFP */
 void JumpToApplication(void);
 void Bootloader_Cleanup(void);
+
+uint8_t ReceivePacket(void);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -133,27 +146,19 @@ int main(void)
 
   while (1)
   {
-      HAL_UART_Receive(&huart3, &rxData, 1, HAL_MAX_DELAY);
+      if (ReceivePacket())
+      {
+          if (commandID == CMD_GET_VERSION)
+          {
+              uint8_t version[] = "Bootloader v1.0\r\n";
 
-      uint8_t response[] = "Received: ";
-
-      HAL_UART_Transmit(&huart3,
-                        response,
-                        sizeof(response) - 1,
-                        HAL_MAX_DELAY);
-
-      HAL_UART_Transmit(&huart3,
-                        &rxData,
-                        1,
-                        HAL_MAX_DELAY);
-
-      HAL_UART_Transmit(&huart3,
-                        (uint8_t *)"\r\n",
-                        2,
-                        HAL_MAX_DELAY);
+              HAL_UART_Transmit(&huart3,
+                                version,
+                                sizeof(version) - 1,
+                                HAL_MAX_DELAY);
+          }
+      }
   }
-
-
 
  /* if (IsApplicationValid())
      {
@@ -269,6 +274,53 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+uint8_t ReceivePacket(void)
+  {
+      // Step 1: Receive start byte
+	if (HAL_UART_Receive(&huart3, &startByte, 1, HAL_MAX_DELAY) != HAL_OK)
+	{
+	    return 0;
+	}
+
+      // Step 2: Validate start byte
+      if (startByte != BOOT_START_BYTE)
+      {
+          return 0;
+      }
+
+      // Step 3: Receive command ID
+      if (HAL_UART_Receive(&huart3, &commandID, 1, HAL_MAX_DELAY) != HAL_OK)
+      {
+          return 0;
+      }
+
+      // Step 4: Receive payload length
+      if (HAL_UART_Receive(&huart3, &payloadLength, 1, HAL_MAX_DELAY) != HAL_OK)
+      {
+          return 0;
+      }
+
+      // Step 5: Validate payload length
+      if (payloadLength > MAX_PAYLOAD_SIZE)
+      {
+          return 0;
+      }
+
+      // Step 6: Receive payload
+      if (payloadLength > 0)
+      {
+          if (HAL_UART_Receive(&huart3,
+                               rxBuffer,
+                               payloadLength,
+                               HAL_MAX_DELAY) != HAL_OK)
+          {
+              return 0;
+          }
+      }
+
+      return 1;
+  }
+
 __attribute__((naked, noreturn))
 void JumpToApplication(void)
 {
