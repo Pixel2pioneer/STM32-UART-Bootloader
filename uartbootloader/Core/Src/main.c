@@ -150,12 +150,50 @@ int main(void)
       {
           if (commandID == CMD_GET_VERSION)
           {
+
               uint8_t version[] = "Bootloader v1.0\r\n";
 
               HAL_UART_Transmit(&huart3,
                                 version,
                                 sizeof(version) - 1,
                                 HAL_MAX_DELAY);
+          }
+          else if (commandID == CMD_GET_STATUS)
+          {
+              uint8_t status[] = "Bootloader Status: READY\r\n";
+
+              HAL_UART_Transmit(&huart3,
+                                status,
+                                sizeof(status) - 1,
+                                HAL_MAX_DELAY);
+          }
+          else if (commandID == CMD_GET_APP_INFO)
+          {
+              uint8_t appAddress[] = "Application Address: 0x08020000\r\n";
+
+              HAL_UART_Transmit(&huart3,
+                                appAddress,
+                                sizeof(appAddress) - 1,
+                                HAL_MAX_DELAY);
+
+              if (IsApplicationValid())
+              {
+                  uint8_t valid[] = "Application Status: VALID\r\n";
+
+                  HAL_UART_Transmit(&huart3,
+                                    valid,
+                                    sizeof(valid) - 1,
+                                    HAL_MAX_DELAY);
+              }
+              else
+              {
+                  uint8_t invalid[] = "Application Status: INVALID\r\n";
+
+                  HAL_UART_Transmit(&huart3,
+                                    invalid,
+                                    sizeof(invalid) - 1,
+                                    HAL_MAX_DELAY);
+              }
           }
       }
   }
