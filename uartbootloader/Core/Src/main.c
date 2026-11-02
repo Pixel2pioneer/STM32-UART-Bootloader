@@ -72,14 +72,16 @@ uint8_t IsApplicationValid(void)
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
+UART_HandleTypeDef huart3;
 
 /* USER CODE BEGIN PV */
-
+uint8_t rxData;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
+static void MX_USART3_UART_Init(void);
 /* USER CODE BEGIN PFP */
 void JumpToApplication(void);
 void Bootloader_Cleanup(void);
@@ -119,12 +121,46 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
+  MX_USART3_UART_Init();
   /* USER CODE BEGIN 2 */
-  if (IsApplicationValid())
+
+  uint8_t message[] = "Bootloader UART is working!\r\n";
+
+  HAL_UART_Transmit(&huart3,
+                    message,
+                    sizeof(message) - 1,
+                    HAL_MAX_DELAY);
+
+  while (1)
+  {
+      HAL_UART_Receive(&huart3, &rxData, 1, HAL_MAX_DELAY);
+
+      uint8_t response[] = "Received: ";
+
+      HAL_UART_Transmit(&huart3,
+                        response,
+                        sizeof(response) - 1,
+                        HAL_MAX_DELAY);
+
+      HAL_UART_Transmit(&huart3,
+                        &rxData,
+                        1,
+                        HAL_MAX_DELAY);
+
+      HAL_UART_Transmit(&huart3,
+                        (uint8_t *)"\r\n",
+                        2,
+                        HAL_MAX_DELAY);
+  }
+
+
+
+ /* if (IsApplicationValid())
      {
 	  Bootloader_Cleanup();
 	  JumpToApplication();
-     }
+     }*/
+
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -180,6 +216,39 @@ void SystemClock_Config(void)
 }
 
 /**
+  * @brief USART3 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_USART3_UART_Init(void)
+{
+
+  /* USER CODE BEGIN USART3_Init 0 */
+
+  /* USER CODE END USART3_Init 0 */
+
+  /* USER CODE BEGIN USART3_Init 1 */
+
+  /* USER CODE END USART3_Init 1 */
+  huart3.Instance = USART3;
+  huart3.Init.BaudRate = 115200;
+  huart3.Init.WordLength = UART_WORDLENGTH_8B;
+  huart3.Init.StopBits = UART_STOPBITS_1;
+  huart3.Init.Parity = UART_PARITY_NONE;
+  huart3.Init.Mode = UART_MODE_TX_RX;
+  huart3.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+  huart3.Init.OverSampling = UART_OVERSAMPLING_16;
+  if (HAL_UART_Init(&huart3) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN USART3_Init 2 */
+
+  /* USER CODE END USART3_Init 2 */
+
+}
+
+/**
   * @brief GPIO Initialization Function
   * @param None
   * @retval None
@@ -191,6 +260,7 @@ static void MX_GPIO_Init(void)
   /* USER CODE END MX_GPIO_Init_1 */
 
   /* GPIO Ports Clock Enable */
+  __HAL_RCC_GPIOD_CLK_ENABLE();
   __HAL_RCC_GPIOA_CLK_ENABLE();
 
   /* USER CODE BEGIN MX_GPIO_Init_2 */
