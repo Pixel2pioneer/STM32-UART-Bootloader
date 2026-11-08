@@ -8,6 +8,8 @@ from protocol import (
     FIRMWARE_CHUNK_SIZE
 )
 
+FIRMWARE_VERSION = 0x01000002  # Restore version 1.0.2
+
 import sys
 import time
 
@@ -19,8 +21,9 @@ def transfer_firmware(serial_handler, firmware):
     print("\nStarting firmware update...")
 
     start_packet = build_start_update_packet(
-        firmware.firmware_data
-    )
+    firmware.firmware_data,
+    FIRMWARE_VERSION
+)
 
     serial_handler.send(start_packet)
 

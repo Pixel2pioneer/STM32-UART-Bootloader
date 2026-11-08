@@ -42,6 +42,9 @@ typedef struct
     uint32_t firmwareCRC;
     uint32_t validMarker;
 
+    uint32_t metadataFormatVersion;
+    uint32_t firmwareVersion;
+
 } ApplicationMetadata;
 
 uint8_t IsMetadataValid(void);
@@ -75,6 +78,9 @@ uint8_t IsMetadataValid(void);
 #define METADATA_MAGIC    0x424F4F54U
 
 #define APP_VALID_MARKER  0x56414C49U
+
+#define METADATA_FORMAT_VERSION  1U
+#define DEFAULT_FIRMWARE_VERSION  0x01000000U
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -126,6 +132,7 @@ uint8_t payloadLength;
 
 uint32_t expectedFirmwareSize;
 uint32_t expectedFirmwareCRC;
+uint32_t expectedFirmwareVersion;
 uint32_t receivedFirmwareBytes;
 uint8_t updateInProgress;
 
@@ -162,7 +169,8 @@ void SendBootloaderResponse(uint8_t response);
 uint32_t CalculateCRC32(uint32_t address, uint32_t length);
 
 HAL_StatusTypeDef WriteApplicationMetadata(uint32_t firmwareSize,
-                                           uint32_t firmwareCRC);
+                                           uint32_t firmwareCRC,
+                                           uint32_t firmwareVersion);
 
 HAL_StatusTypeDef InvalidateApplicationMetadata(void);
 
@@ -280,6 +288,38 @@ int main(void)
 	                                      valid,
 	                                      sizeof(valid) - 1,
 	                                      HAL_MAX_DELAY);
+
+	                    const ApplicationMetadata *metadata =
+	                        (const ApplicationMetadata *)METADATA_ADDRESS;
+
+	                    char versionMessage[64];
+
+	                    if (metadata->metadataFormatVersion == METADATA_FORMAT_VERSION)
+	                    {
+	                        uint32_t version = metadata->firmwareVersion;
+
+	                        uint32_t major = (version >> 24) & 0xFFU;
+	                        uint32_t minor = (version >> 16) & 0xFFU;
+	                        uint32_t patch = version & 0xFFFFU;
+
+	                        snprintf(versionMessage,
+	                                 sizeof(versionMessage),
+	                                 "Firmware Version: %lu.%lu.%lu\r\n",
+	                                 (unsigned long)major,
+	                                 (unsigned long)minor,
+	                                 (unsigned long)patch);
+	                    }
+	                    else
+	                    {
+	                        snprintf(versionMessage,
+	                                 sizeof(versionMessage),
+	                                 "Firmware Version: UNKNOWN (Legacy)\r\n");
+	                    }
+
+	                    HAL_UART_Transmit(&huart3,
+	                                      (uint8_t *)versionMessage,
+	                                      strlen(versionMessage),
+	                                      HAL_MAX_DELAY);
 	                }
 	                else
 	                {
@@ -297,7 +337,7 @@ int main(void)
 	                {
 	                    SendBootloaderResponse(NACK);
 	                }
-	                else if (payloadLength != 8)
+	                else if (payloadLength != 12)
 	                {
 	                    SendBootloaderResponse(NACK);
 	                }
@@ -315,54 +355,59 @@ int main(void)
 	                        ((uint32_t)rxBuffer[6] << 16) |
 	                        ((uint32_t)rxBuffer[7] << 24);
 
+	                    expectedFirmwareVersion =
+	                        (uint32_t)rxBuffer[8] |
+	                        ((uint32_t)rxBuffer[9] << 8) |
+	                        ((uint32_t)rxBuffer[10] << 16) |
+	                        ((uint32_t)rxBuffer[11] << 24);
+
 	                    if ((expectedFirmwareSize == 0U) ||
-	                        (expectedFirmwareSize > APP_MAX_SIZE))
+	                        (expectedFirmwareSize > APP_MAX_SIZE) ||
+	                        (expectedFirmwareVersion == 0U))
 	                    {
 	                        updateInProgress = 0;
-
 	                        SendBootloaderResponse(NACK);
 	                    }
 	                    else
 	                    {
-	                    	HAL_StatusTypeDef metadataStatus =
-	                    	    InvalidateApplicationMetadata();
+	                        HAL_StatusTypeDef metadataStatus =
+	                            InvalidateApplicationMetadata();
 
-	                    	if (metadataStatus == HAL_OK)
-	                    	{
-	                    	    uint32_t failedSector = 0xFFFFFFFFU;
+	                        if (metadataStatus == HAL_OK)
+	                        {
+	                            uint32_t failedSector = 0xFFFFFFFFU;
 
-	                    	    HAL_StatusTypeDef eraseStatus =
-	                    	        EraseApplicationFlash(&failedSector);
+	                            HAL_StatusTypeDef eraseStatus =
+	                                EraseApplicationFlash(&failedSector);
 
+	                            if (eraseStatus == HAL_OK)
+	                            {
+	                                receivedFirmwareBytes = 0;
+	                                nextExpectedOffset = 0;
 
-	                    	    if (eraseStatus == HAL_OK)
-	                    	    {
-	                    	        receivedFirmwareBytes = 0;
-	                    	        nextExpectedOffset = 0;
+	                                lastAcceptedOffset = 0U;
+	                                lastAcceptedLength = 0U;
+	                                lastPacketValid = 0U;
 
-	                    	        lastAcceptedOffset = 0U;
-	                    	        lastAcceptedLength = 0U;
-	                    	        lastPacketValid = 0U;
+	                                firmwareTransferComplete = 0;
+	                                updateInProgress = 1;
 
-	                    	        firmwareTransferComplete = 0;
-	                    	        updateInProgress = 1;
+	                                SendBootloaderResponse(ACK);
+	                            }
+	                            else
+	                            {
+	                                updateInProgress = 0;
+	                                firmwareTransferComplete = 0;
+	                                receivedFirmwareBytes = 0;
+	                                nextExpectedOffset = 0;
 
-	                    	        SendBootloaderResponse(ACK);
-	                    	    }
-	                    	    else
-	                    	    {
-	                    	        updateInProgress = 0;
-	                    	        firmwareTransferComplete = 0;
-	                    	        receivedFirmwareBytes = 0;
-	                    	        nextExpectedOffset = 0;
-
-	                    	        SendBootloaderResponse(NACK);
-	                    	    }
-	                    	}
-	                    	else
-	                    	{
-	                    	    SendBootloaderResponse(NACK);
-	                    	}
+	                                SendBootloaderResponse(NACK);
+	                            }
+	                        }
+	                        else
+	                        {
+	                            SendBootloaderResponse(NACK);
+	                        }
 	                    }
 	                }
 	            }
@@ -457,21 +502,26 @@ int main(void)
 	                }
 	                else if (updateInProgress == 0U)
 	                {
+	                	const ApplicationMetadata *metadata =
+	                	    (const ApplicationMetadata *)METADATA_ADDRESS;
 	                    /*
 	                     * Check whether this is a repeated END_UPDATE request.
 	                     * The previous update must have completed successfully.
 	                     */
-	                    if ((firmwareTransferComplete != 0U) &&
-	                        (IsMetadataValid() != 0U) &&
-	                        (CalculateCRC32(APP_ADDRESS, expectedFirmwareSize) ==
-	                         expectedFirmwareCRC))
-	                    {
-	                        SendBootloaderResponse(ACK);
-	                    }
-	                    else
-	                    {
-	                        SendBootloaderResponse(NACK);
-	                    }
+
+	                	if ((firmwareTransferComplete != 0U) &&
+	                	    (IsMetadataValid() != 0U) &&
+	                	    (metadata->metadataFormatVersion == METADATA_FORMAT_VERSION) &&
+	                	    (metadata->firmwareVersion == expectedFirmwareVersion) &&
+	                	    (CalculateCRC32(APP_ADDRESS, expectedFirmwareSize) ==
+	                	     expectedFirmwareCRC))
+	                	{
+	                	    SendBootloaderResponse(ACK);
+	                	}
+	                	else
+	                	{
+	                	    SendBootloaderResponse(NACK);
+	                	}
 	                }
 	                else if (firmwareTransferComplete == 0U)
 	                {
@@ -484,9 +534,10 @@ int main(void)
 
 	                    if (calculatedCRC == expectedFirmwareCRC)
 	                    {
-	                        HAL_StatusTypeDef metadataStatus =
-	                            WriteApplicationMetadata(expectedFirmwareSize,
-	                                                     expectedFirmwareCRC);
+	                    	HAL_StatusTypeDef metadataStatus =
+	                    	    WriteApplicationMetadata(expectedFirmwareSize,
+	                    	                             expectedFirmwareCRC,
+	                    	                             expectedFirmwareVersion);
 
 	                        if (metadataStatus == HAL_OK)
 	                        {
@@ -628,6 +679,11 @@ uint8_t IsMetadataValid(void)
         metadata->firmwareSize > APP_MAX_SIZE)
         return 0;
 
+    /* Validate metadata format */
+    if ((metadata->metadataFormatVersion != METADATA_FORMAT_VERSION) &&
+        (metadata->metadataFormatVersion != 0xFFFFFFFFU))
+        return 0;
+
     uint32_t calculatedCRC =
         CalculateCRC32(APP_ADDRESS, metadata->firmwareSize);
 
@@ -637,8 +693,7 @@ uint8_t IsMetadataValid(void)
     return 1;
 }
 
-HAL_StatusTypeDef WriteApplicationMetadata(uint32_t firmwareSize,
-                                           uint32_t firmwareCRC)
+HAL_StatusTypeDef WriteApplicationMetadata(uint32_t firmwareSize, uint32_t firmwareCRC, uint32_t firmwareVersion)
 {
 	if ((firmwareSize == 0U) ||
 	    (firmwareSize > APP_MAX_SIZE))
@@ -672,6 +727,7 @@ HAL_StatusTypeDef WriteApplicationMetadata(uint32_t firmwareSize,
     }
 
     /* Write metadata fields */
+
     status = HAL_FLASH_Program(
         FLASH_TYPEPROGRAM_WORD,
         METADATA_ADDRESS,
@@ -696,7 +752,26 @@ HAL_StatusTypeDef WriteApplicationMetadata(uint32_t firmwareSize,
         );
     }
 
+    if (status == HAL_OK)
+    {
+        status = HAL_FLASH_Program(
+            FLASH_TYPEPROGRAM_WORD,
+            METADATA_ADDRESS + 0x10U,
+            METADATA_FORMAT_VERSION
+        );
+    }
+
+    if (status == HAL_OK)
+    {
+        status = HAL_FLASH_Program(
+            FLASH_TYPEPROGRAM_WORD,
+            METADATA_ADDRESS + 0x14U,
+			firmwareVersion
+        );
+    }
+
     /* Write valid marker LAST */
+
     if (status == HAL_OK)
     {
         status = HAL_FLASH_Program(

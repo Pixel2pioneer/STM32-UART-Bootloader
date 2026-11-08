@@ -45,22 +45,24 @@ def calculate_crc32(firmware_data):
     return zlib.crc32(firmware_data) & 0xFFFFFFFF
 
 
-def build_start_update_packet(firmware_data):
+def build_start_update_packet(firmware_data, firmware_version):
     """
     Construct START_UPDATE packet.
 
     Payload:
     Firmware Size (4 bytes)
     Expected CRC32 (4 bytes)
+    Firmware Version (4 bytes)
     """
 
     firmware_size = len(firmware_data)
     firmware_crc = calculate_crc32(firmware_data)
 
     payload = struct.pack(
-        "<II",
+        "<III",
         firmware_size,
-        firmware_crc
+        firmware_crc,
+        firmware_version
     )
 
     return build_packet(CMD_START_UPDATE, payload)
@@ -86,3 +88,15 @@ def build_end_update_packet():
     """
 
     return build_packet(CMD_END_UPDATE)
+
+if __name__ == "__main__":
+
+    test_firmware = b"TEST_FIRMWARE"
+
+    packet = build_start_update_packet(
+        test_firmware,
+        0x01000000
+    )
+
+    print("START_UPDATE packet:", packet.hex(" "))
+    print("Packet length:", len(packet))

@@ -2,7 +2,7 @@
 
 A custom UART-based bootloader implementation for the **STM32F439ZI** microcontroller, featuring firmware reception, Flash programming, CRC32 integrity verification, application metadata management, application validation, and automatic application booting.
 
-The project includes a Python-based firmware updater that communicates with the STM32 bootloader over UART to perform firmware updates, with reliability mechanisms for packet handling and firmware recovery.
+The project includes a Python-based firmware updater that communicates with the STM32 bootloader over UART to perform firmware updates, with reliability mechanisms for packet handling, firmware version management, and interrupted-update recovery.
 
 ## Project Structure
 
@@ -25,6 +25,8 @@ STM32-UART-Bootloader/
 │   ├── serial_handler.py
 │   ├── firmware_parser.py
 │   ├── check_app.py
+│   ├── test_bootloader.py
+│   ├── test_interrupted_update.py
 │   └── requirements.txt
 │
 ├── images/
@@ -155,8 +157,18 @@ Communication between the Python updater and STM32 bootloader uses a custom pack
 - Validation of packet offsets and payload boundaries.
 - Tracking of the last successfully accepted firmware packet.
 - Handling of repeated END_UPDATE requests after successful completion.
+- ACK timeout and retransmission handling in the Python updater.
 
-### 8. Interrupted Firmware Update Recovery
+### 8. Firmware Version Management
+
+- Firmware version supplied by the Python updater during START_UPDATE.
+- 32-bit packed version representation using major, minor, and patch numbers.
+- Firmware version and metadata format version stored in the dedicated metadata sector.
+- Firmware version retrieved through GET_APP_INFO.
+- Legacy metadata recognized and reported as an unknown legacy version until the next successful update.
+- Firmware metadata committed only after successful CRC verification.
+
+### 9. Interrupted Firmware Update Recovery
 
 - Application metadata invalidation before starting a firmware update.
 - Prevention of incomplete firmware from being treated as a valid application.
@@ -180,6 +192,9 @@ Communication between the Python updater and STM32 bootloader uses a custom pack
                 |
                 v
            START_UPDATE
+                |
+                v
+       Receive Firmware Version
                 |
                 v
         Validate Firmware Size
@@ -223,7 +238,7 @@ Communication between the Python updater and STM32 bootloader uses a custom pack
 
 ## Verified Hardware Test
 
-Successfully performed a complete firmware update using the Python updater and STM32F439ZI Nucleo board.
+Successfully performed firmware updates and interrupted-update recovery using the Python updater and STM32F439ZI Nucleo board.
 
 ### Test Configuration
 
@@ -285,6 +300,48 @@ Application Address: 0x08020000
 Application Status: VALID
 ```
 
+### Interrupted Firmware Update Recovery Test
+
+A controlled interruption test was performed using `test_interrupted_update.py`.
+
+**Test procedure:**
+
+1. The updater sent START_UPDATE and received ACK.
+2. The updater sent the first 128-byte DATA_TRANSFER packet and received ACK.
+3. The serial connection was deliberately closed without sending END_UPDATE.
+4. The board was reset without holding the B1 USER button.
+5. The bootloader remained active and did not execute the incomplete application.
+6. The original application firmware was transferred again successfully.
+7. The application booted and LD1 resumed blinking.
+
+**Recovery verification:**
+
+The bootloader successfully remained operational after the interrupted update. The application was subsequently restored by performing a fresh firmware update.
+
+The final GET_APP_INFO check reported:
+
+```text
+Application Address: 0x08020000
+Application Status: VALID
+Firmware Version: 1.0.2
+```
+
+This verifies that an interrupted update leaves the application invalid while keeping the bootloader available for a fresh update and recovery.
+
+### Firmware Version Management Test
+
+Firmware version reporting was verified after successful firmware updates.
+
+| Firmware Version | Result |
+|---|---|
+| 1.0.0 | Successfully installed and reported |
+| 1.0.1 | Successfully installed and reported |
+| 1.0.2 | Successfully installed, restored and reported |
+
+The GET_APP_INFO command reported the stored firmware version from STM32 Flash metadata.
+
+The Python updater transmits the firmware version as part of START_UPDATE. The bootloader stores the version in metadata after successful firmware CRC verification.
+
 ## Software Requirements
 
 ### STM32 Development
@@ -335,27 +392,38 @@ python main.py ..\uart_application\Debug\uart_application.bin
 
 ### Phase 3 – Reliability & Recovery: IN PROGRESS
 
+**Implemented and verified:**
+
 - Duplicate DATA packet detection.
 - Duplicate packet acknowledgement without repeated Flash programming.
 - Firmware offset and packet boundary validation.
 - Repeated END_UPDATE request handling.
-- Interrupted firmware update recovery mechanism.
-- ACK timeout and retransmission improvements.
-- Firmware corruption and communication fault-injection testing.
+- ACK timeout and retransmission handling in the Python updater.
+- Firmware version management and GET_APP_INFO reporting.
+- Interrupted firmware update recovery, verified on hardware.
+- Recovery by reinstalling firmware after an interrupted update.
 
-### Future Improvements
+**Remaining tests and improvements:**
 
-- Firmware version management.
+- Firmware corruption and CRC fault-injection testing.
 - Firmware compatibility checks.
-- Comprehensive packet loss and retransmission testing.
+- Comprehensive packet-loss and retransmission testing.
 - Invalid packet and offset testing.
 - Improved UART synchronization and timeout handling.
 - Communication stress testing.
+
+### Future Improvements
+
 - Firmware authenticity and secure update mechanisms.
+- Firmware compatibility checks.
+- More comprehensive communication fault-injection testing.
+- Further UART synchronization and timeout improvements.
+- Communication stress testing.
 
 ## Author
 
 **Amrutha Pradeep**
 
-Electronics and Communication Engineering  
+Electronics and Communication Engineering
+
 Sardar Vallabhbhai National Institute of Technology (SVNIT), Surat
