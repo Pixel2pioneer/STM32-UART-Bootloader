@@ -1,0 +1,123 @@
+from firmware_parser import FirmwareParser
+from serial_handler import SerialHandler
+
+from protocol import (
+    build_start_update_packet,
+    build_data_packet,
+    build_end_update_packet,
+    FIRMWARE_CHUNK_SIZE
+)
+
+import sys
+import time
+
+def transfer_firmware(serial_handler, firmware):
+
+    # Step 1: Send START_UPDATE
+    print("\nStarting firmware update...")
+
+    start_packet = build_start_update_packet(
+        firmware.firmware_data
+    )
+
+    serial_handler.send(start_packet)
+
+    if not serial_handler.receive_start_response():
+        print("Firmware update initialization failed!")
+        return False
+
+    print("STM32 accepted firmware update.")
+
+    # Step 2: Transfer firmware chunks
+    firmware_data = firmware.firmware_data
+    firmware_size = firmware.firmware_size
+
+    offset = 0
+
+    while offset < firmware_size:
+
+        chunk = firmware_data[
+            offset:offset + FIRMWARE_CHUNK_SIZE
+        ]
+
+        packet = build_data_packet(offset, chunk)
+
+        serial_handler.send(packet)
+
+        if not serial_handler.receive_response():
+            print(f"Transfer failed at offset: {offset}")
+            return False
+
+        offset += len(chunk)
+
+        print(
+            f"\rTransferred: {offset}/{firmware_size} bytes",
+            end=""
+        )
+
+    print("\nFirmware transfer completed.")
+
+    # Step 3: Send END_UPDATE
+    print("Requesting final CRC verification...")
+
+    end_packet = build_end_update_packet()
+
+    serial_handler.send(end_packet)
+
+    if not serial_handler.receive_response():
+        print("Final firmware verification failed!")
+        return False
+
+    print("\nFirmware update successful!")
+
+    return True
+
+
+def main():
+
+    print("\n====================================")
+    print("       STM32 UART FIRMWARE UPDATER")
+    print("====================================")
+
+    if len(sys.argv) != 2:
+        print("\nUsage:")
+        print("python main.py <firmware.bin>")
+        return
+
+    firmware_path = sys.argv[1]
+
+    # Load and validate firmware
+
+    try:
+        firmware = FirmwareParser(firmware_path)
+
+        firmware.load_firmware()
+
+        firmware.display_info()
+
+    except (FileNotFoundError, ValueError) as error:
+        print(f"\nFirmware Error: {error}")
+        return
+
+    # Detect available serial ports
+
+    print("\nAvailable Serial Ports")
+    print("----------------------")
+
+    serial_handler = SerialHandler()
+    serial_handler.list_ports()
+
+    # Connect to STM32
+
+    if not serial_handler.connect():
+        return
+
+    try:
+        transfer_firmware(serial_handler, firmware)
+
+    finally:
+        serial_handler.disconnect()
+
+
+if __name__ == "__main__":
+    main()
