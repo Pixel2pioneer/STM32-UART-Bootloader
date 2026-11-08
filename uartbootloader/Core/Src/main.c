@@ -134,6 +134,10 @@ uint16_t receivedChunkSize;
 uint32_t nextExpectedOffset;
 
 uint8_t firmwareTransferComplete;
+
+uint32_t lastAcceptedOffset = 0U;
+uint32_t lastAcceptedLength = 0U;
+uint8_t lastPacketValid = 0U;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -149,6 +153,10 @@ HAL_StatusTypeDef EraseApplicationFlash(uint32_t *failedSector);
 HAL_StatusTypeDef ProgramApplicationFlash(uint32_t offset,
                                           uint8_t *data,
                                           uint16_t length);
+uint8_t IsDuplicatePacket(uint32_t offset,
+                          uint8_t *data,
+                          uint16_t length);
+
 void SendBootloaderResponse(uint8_t response);
 
 uint32_t CalculateCRC32(uint32_t address, uint32_t length);
@@ -161,6 +169,7 @@ HAL_StatusTypeDef InvalidateApplicationMetadata(void);
 void Bootloader_CheckAndBootApplication(void);
 
 uint8_t IsBootloaderButtonPressed(void);
+
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -330,6 +339,11 @@ int main(void)
 	                    	    {
 	                    	        receivedFirmwareBytes = 0;
 	                    	        nextExpectedOffset = 0;
+
+	                    	        lastAcceptedOffset = 0U;
+	                    	        lastAcceptedLength = 0U;
+	                    	        lastPacketValid = 0U;
+
 	                    	        firmwareTransferComplete = 0;
 	                    	        updateInProgress = 1;
 
@@ -354,8 +368,7 @@ int main(void)
 	            }
 	            else if (commandID == CMD_DATA_TRANSFER)
 	            {
-	                if ((updateInProgress == 0) ||
-	                    (firmwareTransferComplete != 0))
+	                if (updateInProgress == 0)
 	                {
 	                    SendBootloaderResponse(NACK);
 	                }
@@ -373,54 +386,94 @@ int main(void)
 
 	                    receivedChunkSize = payloadLength - 4U;
 
-	                    if ((receivedOffset != nextExpectedOffset) ||
-	                        ((receivedOffset & 0x03U) != 0U))
+	                    /* Check whether this packet is a duplicate */
+	                    if (IsDuplicatePacket(receivedOffset,
+	                                          &rxBuffer[4],
+	                                          receivedChunkSize))
 	                    {
-	                        SendBootloaderResponse(NACK);
+	                        SendBootloaderResponse(ACK);
 	                    }
-	                    else if ((receivedChunkSize > expectedFirmwareSize) ||
-	                             (receivedOffset > expectedFirmwareSize - receivedChunkSize))
-	                    {
-	                        SendBootloaderResponse(NACK);
-	                    }
-	                    else if (((receivedOffset + receivedChunkSize) < expectedFirmwareSize) &&
-	                             ((receivedChunkSize & 0x03U) != 0U))
+	                    else if (firmwareTransferComplete != 0)
 	                    {
 	                        SendBootloaderResponse(NACK);
 	                    }
 	                    else
 	                    {
-	                        HAL_StatusTypeDef flashStatus =
-	                            ProgramApplicationFlash(receivedOffset,
-	                                                    &rxBuffer[4],
-	                                                    receivedChunkSize);
-
-	                        if (flashStatus != HAL_OK)
+	                        /* Validate firmware offset */
+	                        if ((receivedOffset != nextExpectedOffset) ||
+	                            ((receivedOffset & 0x03U) != 0U))
+	                        {
+	                            SendBootloaderResponse(NACK);
+	                        }
+	                        else if ((receivedChunkSize > expectedFirmwareSize) ||
+	                                 (receivedOffset > expectedFirmwareSize - receivedChunkSize))
+	                        {
+	                            SendBootloaderResponse(NACK);
+	                        }
+	                        else if (((receivedOffset + receivedChunkSize) < expectedFirmwareSize) &&
+	                                 ((receivedChunkSize & 0x03U) != 0U))
 	                        {
 	                            SendBootloaderResponse(NACK);
 	                        }
 	                        else
 	                        {
-	                            receivedFirmwareBytes += receivedChunkSize;
+	                            HAL_StatusTypeDef flashStatus =
+	                                ProgramApplicationFlash(receivedOffset,
+	                                                        &rxBuffer[4],
+	                                                        receivedChunkSize);
 
-	                            nextExpectedOffset =
-	                                receivedOffset + receivedChunkSize;
-
-	                            if (receivedFirmwareBytes == expectedFirmwareSize)
+	                            if (flashStatus != HAL_OK)
 	                            {
-	                                firmwareTransferComplete = 1;
+	                                SendBootloaderResponse(NACK);
 	                            }
+	                            else
+	                            {
+	                                receivedFirmwareBytes += receivedChunkSize;
 
-	                            SendBootloaderResponse(ACK);
+	                                nextExpectedOffset =
+	                                    receivedOffset + receivedChunkSize;
+
+	                                /* Store information about the accepted packet */
+	                                lastAcceptedOffset = receivedOffset;
+	                                lastAcceptedLength = receivedChunkSize;
+	                                lastPacketValid = 1U;
+
+	                                if (receivedFirmwareBytes == expectedFirmwareSize)
+	                                {
+	                                    firmwareTransferComplete = 1U;
+	                                }
+
+	                                SendBootloaderResponse(ACK);
+	                            }
 	                        }
 	                    }
 	                }
 	            }
 	            else if (commandID == CMD_END_UPDATE)
 	            {
-	                if ((updateInProgress == 0) ||
-	                    (firmwareTransferComplete == 0) ||
-	                    (payloadLength != 0))
+	                if (payloadLength != 0U)
+	                {
+	                    SendBootloaderResponse(NACK);
+	                }
+	                else if (updateInProgress == 0U)
+	                {
+	                    /*
+	                     * Check whether this is a repeated END_UPDATE request.
+	                     * The previous update must have completed successfully.
+	                     */
+	                    if ((firmwareTransferComplete != 0U) &&
+	                        (IsMetadataValid() != 0U) &&
+	                        (CalculateCRC32(APP_ADDRESS, expectedFirmwareSize) ==
+	                         expectedFirmwareCRC))
+	                    {
+	                        SendBootloaderResponse(ACK);
+	                    }
+	                    else
+	                    {
+	                        SendBootloaderResponse(NACK);
+	                    }
+	                }
+	                else if (firmwareTransferComplete == 0U)
 	                {
 	                    SendBootloaderResponse(NACK);
 	                }
@@ -437,7 +490,7 @@ int main(void)
 
 	                        if (metadataStatus == HAL_OK)
 	                        {
-	                            updateInProgress = 0;
+	                            updateInProgress = 0U;
 	                            SendBootloaderResponse(ACK);
 	                        }
 	                        else
@@ -587,6 +640,12 @@ uint8_t IsMetadataValid(void)
 HAL_StatusTypeDef WriteApplicationMetadata(uint32_t firmwareSize,
                                            uint32_t firmwareCRC)
 {
+	if ((firmwareSize == 0U) ||
+	    (firmwareSize > APP_MAX_SIZE))
+	{
+	    return HAL_ERROR;
+	}
+
     HAL_StatusTypeDef status;
     uint32_t sectorError = 0xFFFFFFFFU;
 
@@ -734,6 +793,48 @@ HAL_StatusTypeDef ProgramApplicationFlash(uint32_t offset,
     HAL_FLASH_Lock();
 
     return status;
+}
+
+uint8_t IsDuplicatePacket(uint32_t offset,
+                          uint8_t *data,
+                          uint16_t length)
+{
+    /* Validate input parameters and Flash boundaries */
+    if ((data == NULL) ||
+        (length == 0U) ||
+        ((offset & 0x03U) != 0U) ||
+        (offset > APP_MAX_SIZE) ||
+        ((uint32_t)length > (APP_MAX_SIZE - offset)))
+    {
+        return 0U;
+    }
+
+    /* No previously accepted packet */
+    if (lastPacketValid == 0U)
+    {
+        return 0U;
+    }
+
+    /* Check whether offset and length match */
+    if ((offset != lastAcceptedOffset) ||
+        (length != lastAcceptedLength))
+    {
+        return 0U;
+    }
+
+    /* Compare received data with data already stored in Flash */
+    const uint8_t *flashData =
+        (const uint8_t *)(APP_ADDRESS + offset);
+
+    for (uint16_t i = 0U; i < length; i++)
+    {
+        if (flashData[i] != data[i])
+        {
+            return 0U;
+        }
+    }
+
+    return 1U;
 }
 
 void SendBootloaderResponse(uint8_t response)

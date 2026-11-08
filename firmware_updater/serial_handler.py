@@ -68,40 +68,29 @@ class SerialHandler:
             return False
 
         else:
-            print("Invalid response or timeout:", response)
-            return False
+           print("ACK timeout or invalid response:", response)
+           return None
 
     def receive_start_response(self):
-        """Receive STM32 diagnostic message and ACK/NACK."""
+        """Receive ACK/NACK after firmware update initialization."""
 
         old_timeout = self.connection.timeout
         self.connection.timeout = 60
 
         try:
-            response_data = bytearray()
+            return self.receive_response()
 
-            while True:
-                received = self.connection.read(1)
+        finally:
+            self.connection.timeout = old_timeout
 
-                if not received:
-                    print("\nTimed out waiting for STM32 response.")
-                    print("Received data:", response_data)
-                    return False
+    def receive_end_response(self):
+        """Receive ACK/NACK after final firmware verification."""
 
-                if received == b'\x79':
-                    print("\nSTM32 returned ACK.")
-                    if response_data:
-                        print(response_data.decode(errors="replace").strip())
-                    return True
+        old_timeout = self.connection.timeout
+        self.connection.timeout = 10
 
-                elif received == b'\x1F':
-                    print("\nSTM32 returned NACK.")
-                    if response_data:
-                        print(response_data.decode(errors="replace").strip())
-                    return False
-
-                else:
-                    response_data.extend(received)
+        try:
+            return self.receive_response()
 
         finally:
             self.connection.timeout = old_timeout

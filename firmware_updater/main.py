@@ -13,6 +13,8 @@ import time
 
 def transfer_firmware(serial_handler, firmware):
 
+    MAX_RETRIES = 3
+
     # Step 1: Send START_UPDATE
     print("\nStarting firmware update...")
 
@@ -42,10 +44,30 @@ def transfer_firmware(serial_handler, firmware):
 
         packet = build_data_packet(offset, chunk)
 
-        serial_handler.send(packet)
+        acknowledged = False
 
-        if not serial_handler.receive_response():
-            print(f"Transfer failed at offset: {offset}")
+        for attempt in range(1, MAX_RETRIES + 1):
+
+            serial_handler.send(packet)
+
+            response = serial_handler.receive_response()
+
+            if response is True:
+                acknowledged = True
+                break
+
+            elif response is False:
+                print(f"\nBootloader rejected packet at offset {offset}.")
+                return False
+
+            else:
+                print(
+                    f"\nACK timeout at offset {offset}. "
+                    f"Retry {attempt}/{MAX_RETRIES}"
+                )
+
+        if not acknowledged:
+            print(f"\nMaximum retries reached at offset {offset}.")
             return False
 
         offset += len(chunk)
@@ -62,16 +84,35 @@ def transfer_firmware(serial_handler, firmware):
 
     end_packet = build_end_update_packet()
 
-    serial_handler.send(end_packet)
+    end_acknowledged = False
 
-    if not serial_handler.receive_response():
-        print("Final firmware verification failed!")
+    for attempt in range(1, MAX_RETRIES + 1):
+
+        serial_handler.send(end_packet)
+
+        response = serial_handler.receive_end_response()
+
+        if response is True:
+            end_acknowledged = True
+            break
+
+        elif response is False:
+            print("\nBootloader rejected END_UPDATE.")
+            return False
+
+        else:
+            print(
+                f"\nEND_UPDATE ACK timeout. "
+                f"Attempt {attempt}/{MAX_RETRIES}"
+            )
+
+    if not end_acknowledged:
+        print("\nMaximum END_UPDATE attempts reached.")
         return False
 
     print("\nFirmware update successful!")
 
     return True
-
 
 def main():
 
