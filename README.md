@@ -1,24 +1,21 @@
 # STM32 UART Bootloader & Firmware Updater
 
-A custom UART-based bootloader implementation for the **STM32F439ZI** microcontroller, featuring firmware reception, Flash programming, CRC32 integrity verification, application metadata management, application validation, and automatic application booting.
+A custom UART-based bootloader for the **STM32F439ZI**, featuring firmware reception, Flash programming, CRC32 integrity verification, application metadata management, application validation, and automatic application booting.
 
-The project includes a Python-based firmware updater that communicates with the STM32 bootloader over UART to perform firmware updates, with reliability mechanisms for packet handling, firmware version management, and interrupted-update recovery.
+The project includes a Python-based firmware updater with packet handling, firmware version management, and interrupted-update recovery.
 
 ## Project Structure
 
 ```text
 STM32-UART-Bootloader/
-│
 ├── uartbootloader/
 │   ├── Core/
 │   ├── Drivers/
 │   └── ...
-│
 ├── uart_application/
 │   ├── Core/
 │   ├── Drivers/
 │   └── ...
-│
 ├── firmware_updater/
 │   ├── main.py
 │   ├── protocol.py
@@ -27,13 +24,12 @@ STM32-UART-Bootloader/
 │   ├── check_app.py
 │   ├── test_bootloader.py
 │   ├── test_interrupted_update.py
+│   ├── test_crc_corruption.py
 │   └── requirements.txt
-│
 ├── images/
 │   ├── firmware_update_success.jpeg
 │   ├── application_running.jpeg
 │   └── bootloader_uart.png
-│
 ├── .gitignore
 └── README.md
 ```
@@ -49,14 +45,11 @@ STM32-UART-Bootloader/
 | Firmware Language | Embedded C |
 | Host-side Updater | Python |
 | Communication Interface | USART3 |
-| UART TX | PD8 |
-| UART RX | PD9 |
+| UART TX / RX | PD8 / PD9 |
 | Baud Rate | 115200 |
 | Serial Interface | ST-LINK Virtual COM Port |
 
 ## Flash Memory Layout
-
-The STM32 internal Flash memory is partitioned into three regions.
 
 | Region | Start Address | Size | Sectors |
 |---|---|---|---|
@@ -64,27 +57,24 @@ The STM32 internal Flash memory is partitioned into three regions.
 | Metadata | 0x08010000 | 64 KB | 4 |
 | Application | 0x08020000 | 1920 KB | 5–23 |
 
-The bootloader and metadata regions are preserved during application firmware updates. Only the application Flash sectors are erased and programmed during an update.
+The bootloader and metadata regions are preserved during application firmware updates. Only application Flash sectors are erased and programmed.
 
 ## Implemented Features
 
 ### 1. Bootloader Architecture
 
 - Separate bootloader and application projects.
-- Independent linker scripts.
-- Dedicated Flash memory partitioning.
+- Independent linker scripts and dedicated Flash memory partitioning.
 - Application vector table relocation.
-- Bootloader entry using the onboard B1 USER button.
+- Manual bootloader entry using the onboard B1 USER button.
 - Automatic application boot when a valid application is available.
 - Protected bootloader Flash region during firmware updates.
 
 ### 2. Application Validation & Handover
 
 - Initial Stack Pointer validation against SRAM boundaries.
-- Reset Handler address validation.
-- Application Flash address range verification.
-- Application metadata validation.
-- CRC32 verification before application execution.
+- Reset Handler address and application Flash range validation.
+- Application metadata and CRC32 validation.
 - Interrupt and SysTick cleanup before application handover.
 - Assembly-based application jump.
 - Vector Table Offset Register (VTOR) relocation.
@@ -93,7 +83,7 @@ The bootloader and metadata regions are preserved during application firmware up
 
 Communication between the Python updater and STM32 bootloader uses a custom packet-based UART protocol.
 
-**Packet Format:**
+**Packet format:**
 
 ```text
 [START_BYTE] [COMMAND_ID] [PAYLOAD_LENGTH] [PAYLOAD]
@@ -107,7 +97,7 @@ Communication between the Python updater and STM32 bootloader uses a custom pack
 | Maximum Payload | 255 bytes |
 | Firmware Chunk Size | 128 bytes |
 
-**Supported Commands:**
+**Supported commands:**
 
 | Command | Command ID | Description |
 |---|---|---|
@@ -120,61 +110,72 @@ Communication between the Python updater and STM32 bootloader uses a custom pack
 
 ### 4. Flash Programming & Metadata Management
 
-- Application Flash sector erasure.
-- Firmware programming using STM32 HAL Flash APIs.
+- Application Flash sector erasure and programming using STM32 HAL Flash APIs.
 - Sequential firmware chunk reception.
 - Firmware offset and boundary validation.
-- Application metadata storage in a dedicated Flash sector.
+- Application metadata stored in a dedicated Flash sector.
 - Metadata invalidation before firmware updates.
 - Valid marker programmed only after successful CRC verification.
-- Protection of bootloader and metadata regions during application erasure.
+- Bootloader and metadata regions protected during application erasure.
 
 ### 5. Firmware Integrity Verification
 
-- CRC32 calculation on the Python side.
-- CRC32 calculation on the STM32 side.
-- Comparison of received and calculated firmware CRC.
+- CRC32 calculation on both Python and STM32 sides.
+- Comparison of expected and calculated firmware CRC.
 - Application validation using stored metadata.
-- Verification of firmware size and application memory boundaries.
+- Firmware size and application memory boundary checks.
+- Hardware fault-injection test using an intentionally modified firmware byte.
+- Verification that corrupted firmware is rejected when CRC values do not match.
 
 ### 6. Python Firmware Updater
 
-- Firmware binary file loading.
-- Firmware size validation.
-- CRC32 calculation.
-- Serial port detection.
+- Firmware binary loading and size validation.
+- CRC32 calculation and serial port detection.
 - UART communication using PySerial.
 - Packet construction and transmission.
 - ACK/NACK response handling.
-- Firmware transfer progress monitoring.
-- Final firmware verification.
+- Firmware transfer progress monitoring and final verification.
 
 ### 7. Firmware Transfer Reliability
 
-- Duplicate DATA packet detection using packet offset, length, and Flash data comparison.
-- Re-acknowledgement of previously accepted identical DATA packets.
+- Duplicate DATA packet detection using offset, length, and Flash data comparison.
+- Re-acknowledgement of previously accepted identical packets.
 - Prevention of repeated Flash programming for duplicate packets.
-- Validation of packet offsets and payload boundaries.
+- Packet offset and payload boundary validation.
 - Tracking of the last successfully accepted firmware packet.
-- Handling of repeated END_UPDATE requests after successful completion.
+- Repeated END_UPDATE request handling after successful completion.
 - ACK timeout and retransmission handling in the Python updater.
 
 ### 8. Firmware Version Management
 
 - Firmware version supplied by the Python updater during START_UPDATE.
 - 32-bit packed version representation using major, minor, and patch numbers.
-- Firmware version and metadata format version stored in the dedicated metadata sector.
+- Firmware version and metadata format version stored in Flash metadata.
 - Firmware version retrieved through GET_APP_INFO.
-- Legacy metadata recognized and reported as an unknown legacy version until the next successful update.
+- Legacy metadata recognized and reported as an unknown legacy version.
 - Firmware metadata committed only after successful CRC verification.
 
 ### 9. Interrupted Firmware Update Recovery
 
-- Application metadata invalidation before starting a firmware update.
-- Prevention of incomplete firmware from being treated as a valid application.
+- Application metadata invalidated before starting an update.
+- Incomplete firmware is prevented from being treated as a valid application.
 - Bootloader remains operational when application validation fails.
-- Support for initiating a fresh firmware update after an interrupted update.
-- Recovery of application execution through successful firmware reprogramming and metadata validation.
+- A fresh firmware update can be initiated after an interrupted update.
+- Application execution restored through successful firmware reprogramming and metadata validation.
+
+### 10. CRC Corruption Detection & Recovery
+
+A controlled fault-injection test was performed by modifying one byte of the firmware data before transmission while retaining the CRC calculated from the original firmware.
+
+- The updater sends the original firmware size, CRC32, and version in START_UPDATE.
+- One byte in the transmitted firmware copy is intentionally modified.
+- The STM32 calculates CRC32 from application Flash when END_UPDATE is received.
+- The CRC mismatch causes the bootloader to reject END_UPDATE with NACK.
+- Since metadata was invalidated at the start of the update, corrupted firmware remains invalid.
+- After reset, the bootloader stays active instead of jumping to the invalid application.
+- The original firmware was subsequently transferred successfully and application execution was restored.
+
+A separate `test_crc_corruption.py` script was added so the test can be reproduced without modifying the normal `main.py` updater. The script passed its Python syntax check; its standalone hardware execution has not yet been repeated.
 
 ## Firmware Update Workflow
 
@@ -236,9 +237,9 @@ Communication between the Python updater and STM32 bootloader uses a custom pack
        Boot Application Firmware
 ```
 
-## Verified Hardware Test
+## Verified Hardware Tests
 
-Successfully performed firmware updates and interrupted-update recovery using the Python updater and STM32F439ZI Nucleo board.
+Tests were performed using the Python updater and STM32F439ZI Nucleo board.
 
 ### Test Configuration
 
@@ -252,7 +253,7 @@ Successfully performed firmware updates and interrupted-update recovery using th
 | Transfer Chunk Size | 128 bytes |
 | Flash Erase | Successful |
 | Firmware Transfer | Successful |
-| CRC Verification | Successful |
+| CRC Verification (original firmware) | Successful |
 | Metadata Programming | Successful |
 | Automatic Application Boot | Successful |
 
@@ -276,35 +277,9 @@ UART communication was verified through the ST-LINK Virtual COM Port using PuTTY
 
 ![Bootloader UART Communication](images/bootloader_uart.png)
 
-### Application Recovery Verification
-
-During development, the application metadata and application Flash regions were found erased.
-
-The bootloader remained operational and continued responding to UART commands.
-
-A fresh firmware update was subsequently performed successfully.
-
-The following recovery operations were verified:
-
-- Bootloader UART communication.
-- Firmware transfer through the Python updater.
-- CRC32 verification.
-- Metadata programming.
-- Application validation.
-- Successful application execution after reset.
-
-The bootloader reported:
-
-```text
-Application Address: 0x08020000
-Application Status: VALID
-```
-
 ### Interrupted Firmware Update Recovery Test
 
 A controlled interruption test was performed using `test_interrupted_update.py`.
-
-**Test procedure:**
 
 1. The updater sent START_UPDATE and received ACK.
 2. The updater sent the first 128-byte DATA_TRANSFER packet and received ACK.
@@ -313,10 +288,6 @@ A controlled interruption test was performed using `test_interrupted_update.py`.
 5. The bootloader remained active and did not execute the incomplete application.
 6. The original application firmware was transferred again successfully.
 7. The application booted and LD1 resumed blinking.
-
-**Recovery verification:**
-
-The bootloader successfully remained operational after the interrupted update. The application was subsequently restored by performing a fresh firmware update.
 
 The final GET_APP_INFO check reported:
 
@@ -330,17 +301,30 @@ This verifies that an interrupted update leaves the application invalid while ke
 
 ### Firmware Version Management Test
 
-Firmware version reporting was verified after successful firmware updates.
-
 | Firmware Version | Result |
 |---|---|
 | 1.0.0 | Successfully installed and reported |
 | 1.0.1 | Successfully installed and reported |
 | 1.0.2 | Successfully installed, restored and reported |
 
-The GET_APP_INFO command reported the stored firmware version from STM32 Flash metadata.
+The GET_APP_INFO command reported the stored firmware version from STM32 Flash metadata. The Python updater transmits the firmware version as part of START_UPDATE, and the bootloader stores it after successful firmware CRC verification.
 
-The Python updater transmits the firmware version as part of START_UPDATE. The bootloader stores the version in metadata after successful firmware CRC verification.
+### CRC Corruption & Recovery Hardware Test
+
+A controlled corruption test was performed using the original application binary (6,112 bytes, expected CRC32 `0xF6213C40`).
+
+1. The updater sent START_UPDATE with the original firmware size, CRC32, and version.
+2. One byte at offset 100 was intentionally modified in the firmware data sent to the STM32.
+3. The bootloader acknowledged the DATA_TRANSFER packets.
+4. On END_UPDATE, the bootloader recalculated CRC32 from Flash and returned NACK because the calculated CRC did not match the expected CRC.
+5. The board was reset normally, without holding B1. LD1 remained OFF, consistent with the bootloader refusing to jump to the invalid application.
+6. The board was returned to bootloader mode and `test_bootloader.py` reported `Application Status: INVALID`.
+7. The original, unmodified firmware was transferred using the normal updater. END_UPDATE was acknowledged.
+8. After reset, LD1 resumed blinking. A subsequent GET_APP_INFO check reported `Application Status: VALID` and `Firmware Version: 1.0.2`.
+
+**Observed result:** The corrupted firmware was rejected, the bootloader remained available for recovery, and the original firmware was successfully restored.
+
+A standalone `test_crc_corruption.py` script was added for repeatable testing. Its Python syntax check passed; the hardware results above were obtained during the earlier manual fault-injection test.
 
 ## Software Requirements
 
@@ -360,13 +344,19 @@ Install the Python dependencies:
 pip install -r requirements.txt
 ```
 
-Run the firmware updater from the `firmware_updater` directory:
+Run the normal firmware updater from the `firmware_updater` directory:
 
 ```bash
 python main.py ..\uart_application\Debug\uart_application.bin
 ```
 
-**Note:** Ensure the STM32 is in bootloader mode and the correct serial port is configured before initiating an update. Close PuTTY or other serial terminal applications before running the updater.
+Run the dedicated CRC corruption test from the same directory:
+
+```bash
+python test_crc_corruption.py ..\uart_application\Debug\uart_application.bin
+```
+
+**Note:** The CRC corruption test intentionally invalidates the current application by starting an update and sending modified firmware data. After the test, use the normal `main.py` updater with the original, unmodified firmware binary to restore the application. Ensure the STM32 is in bootloader mode and the correct serial port is configured before initiating either operation. Close PuTTY or other serial terminal applications before running a script.
 
 ## Project Status
 
@@ -402,17 +392,18 @@ python main.py ..\uart_application\Debug\uart_application.bin
 - Firmware version management and GET_APP_INFO reporting.
 - Interrupted firmware update recovery, verified on hardware.
 - Recovery by reinstalling firmware after an interrupted update.
+- CRC corruption rejection and recovery, verified on hardware.
+- Dedicated CRC corruption test script added and Python syntax checked.
 
 **Remaining tests and improvements:**
 
-- Firmware corruption and CRC fault-injection testing.
 - Firmware compatibility checks.
 - Comprehensive packet-loss and retransmission testing.
 - Invalid packet and offset testing.
 - Improved UART synchronization and timeout handling.
 - Communication stress testing.
 
-### Future Improvements
+## Future Improvements
 
 - Firmware authenticity and secure update mechanisms.
 - Firmware compatibility checks.

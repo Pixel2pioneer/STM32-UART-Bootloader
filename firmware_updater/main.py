@@ -34,6 +34,7 @@ def transfer_firmware(serial_handler, firmware):
     print("STM32 accepted firmware update.")
 
     # Step 2: Transfer firmware chunks
+
     firmware_data = firmware.firmware_data
     firmware_size = firmware.firmware_size
 
