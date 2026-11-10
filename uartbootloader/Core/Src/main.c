@@ -555,6 +555,11 @@ int main(void)
 	                    }
 	                }
 	            }
+	            else
+	            {
+	                // Reject unsupported command IDs
+	                SendBootloaderResponse(NACK);
+	            }
 
 	            }
   }

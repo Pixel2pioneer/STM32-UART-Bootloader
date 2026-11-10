@@ -15,6 +15,9 @@ CMD_END_UPDATE = 0x06
 MAX_PAYLOAD_SIZE = 255
 FIRMWARE_CHUNK_SIZE = 128
 
+ACK = 0x79
+NACK = 0x1F
+
 
 def build_packet(command_id, payload=b""):
     """

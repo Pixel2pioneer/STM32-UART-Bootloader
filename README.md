@@ -2,20 +2,23 @@
 
 A custom UART-based bootloader for the **STM32F439ZI**, featuring firmware reception, Flash programming, CRC32 integrity verification, application metadata management, application validation, and automatic application booting.
 
-The project includes a Python-based firmware updater with packet handling, firmware version management, and interrupted-update recovery.
+The project includes a Python-based firmware updater with packet handling, firmware version management, duplicate packet detection, and interrupted-update recovery.
 
 ## Project Structure
 
 ```text
 STM32-UART-Bootloader/
+│
 ├── uartbootloader/
 │   ├── Core/
 │   ├── Drivers/
 │   └── ...
+│
 ├── uart_application/
 │   ├── Core/
 │   ├── Drivers/
 │   └── ...
+│
 ├── firmware_updater/
 │   ├── main.py
 │   ├── protocol.py
@@ -25,11 +28,20 @@ STM32-UART-Bootloader/
 │   ├── test_bootloader.py
 │   ├── test_interrupted_update.py
 │   ├── test_crc_corruption.py
+│   ├── test_invalid_packets.py
 │   └── requirements.txt
+│
 ├── images/
 │   ├── firmware_update_success.jpeg
+│   ├── firmware_restoration.png
 │   ├── application_running.jpeg
-│   └── bootloader_uart.png
+│   ├── bootloader_uart.png
+│   ├── test_cases_01_05.png
+│   ├── test_cases_06A_06B.png
+│   ├── test_cases_07_08.png
+│   ├── test_cases_09_13.png
+│   └── test_cases_14_15.png
+│
 ├── .gitignore
 └── README.md
 ```
@@ -124,7 +136,7 @@ Communication between the Python updater and STM32 bootloader uses a custom pack
 - Comparison of expected and calculated firmware CRC.
 - Application validation using stored metadata.
 - Firmware size and application memory boundary checks.
-- Hardware fault-injection test using an intentionally modified firmware byte.
+- Hardware fault-injection testing using an intentionally modified firmware byte.
 - Verification that corrupted firmware is rejected when CRC values do not match.
 
 ### 6. Python Firmware Updater
@@ -144,7 +156,7 @@ Communication between the Python updater and STM32 bootloader uses a custom pack
 - Packet offset and payload boundary validation.
 - Tracking of the last successfully accepted firmware packet.
 - Repeated END_UPDATE request handling after successful completion.
-- ACK timeout and retransmission handling in the Python updater.
+- ACK timeout handling and retransmission support in the Python updater.
 
 ### 8. Firmware Version Management
 
@@ -163,7 +175,26 @@ Communication between the Python updater and STM32 bootloader uses a custom pack
 - A fresh firmware update can be initiated after an interrupted update.
 - Application execution restored through successful firmware reprogramming and metadata validation.
 
-### 10. CRC Corruption Detection & Recovery
+### 10. Invalid Packet & Command Handling
+
+The bootloader validates incoming commands and firmware transfer packets before processing them.
+
+Implemented checks include:
+
+- DATA_TRANSFER rejection before START_UPDATE.
+- Incorrect and unaligned firmware offset rejection.
+- Invalid DATA_TRANSFER payload length rejection.
+- Firmware boundary validation.
+- Rejection of data received after firmware transfer completion.
+- Out-of-sequence packet rejection.
+- Zero and oversized firmware rejection.
+- Invalid firmware version rejection.
+- Invalid START_UPDATE and END_UPDATE payload length rejection.
+- Unknown command ID rejection through a default NACK response.
+- Duplicate START_UPDATE rejection.
+- Repeated END_UPDATE handling after successful firmware installation.
+
+### 11. CRC Corruption Detection & Recovery
 
 A controlled fault-injection test was performed by modifying one byte of the firmware data before transmission while retaining the CRC calculated from the original firmware.
 
@@ -175,71 +206,71 @@ A controlled fault-injection test was performed by modifying one byte of the fir
 - After reset, the bootloader stays active instead of jumping to the invalid application.
 - The original firmware was subsequently transferred successfully and application execution was restored.
 
-A separate `test_crc_corruption.py` script was added so the test can be reproduced without modifying the normal `main.py` updater. The script passed its Python syntax check; its standalone hardware execution has not yet been repeated.
+A separate `test_crc_corruption.py` script was added to reproduce the test without modifying the normal `main.py` updater. The script passed its Python syntax check; the hardware fault-injection results documented below were obtained during manual testing.
 
 ## Firmware Update Workflow
 
 ```text
        Python Firmware Updater
-                |
-                v
+                 |
+                 v
           Load Firmware BIN
-                |
-                v
-          Calculate CRC32
-                |
-                v
+                 |
+                 v
+           Calculate CRC32
+                 |
+                 v
           Connect via UART
-                |
-                v
-           START_UPDATE
-                |
-                v
-       Receive Firmware Version
-                |
-                v
+                 |
+                 v
+            START_UPDATE
+                 |
+                 v
+        Receive Firmware Version
+                 |
+                 v
         Validate Firmware Size
-                |
-                v
+                 |
+                 v
         Invalidate Metadata
-                |
-                v
+                 |
+                 v
         Erase Application Flash
-                |
-                v
-          DATA_TRANSFER
-                |
-                v
-       Validate Packet Offset
-                |
-                v
-       Check Duplicate Packet
-                |
-                v
-       Program Application Flash
-                |
-                v
-          Send ACK / NACK
-                |
-                v
-           END_UPDATE
-                |
-                v
-          Verify CRC32
-                |
-                v
-          Write Metadata
-                |
-                v
-        Validate Application
-                |
-                v
-       Boot Application Firmware
+                 |
+                 v
+           DATA_TRANSFER
+                 |
+                 v
+        Validate Packet Offset
+                 |
+                 v
+        Check Duplicate Packet
+                 |
+                 v
+        Program Application Flash
+                 |
+                 v
+            Send ACK / NACK
+                 |
+                 v
+             END_UPDATE
+                 |
+                 v
+            Verify CRC32
+                 |
+                 v
+            Write Metadata
+                 |
+                 v
+         Validate Application
+                 |
+                 v
+        Boot Application Firmware
 ```
 
-## Verified Hardware Tests
+## Hardware Validation & Testing
 
-Tests were performed using the Python updater and STM32F439ZI Nucleo board.
+Hardware testing was performed using the Python firmware updater and STM32F439ZI NUCLEO development board.
 
 ### Test Configuration
 
@@ -253,31 +284,86 @@ Tests were performed using the Python updater and STM32F439ZI Nucleo board.
 | Transfer Chunk Size | 128 bytes |
 | Flash Erase | Successful |
 | Firmware Transfer | Successful |
-| CRC Verification (original firmware) | Successful |
+| CRC Verification | Successful |
 | Metadata Programming | Successful |
 | Automatic Application Boot | Successful |
 
-### Hardware Demonstration
+### 1. Successful Firmware Update
 
-**1. Successful Firmware Update**
-
-The Python firmware updater successfully transmitted the application binary to the STM32 bootloader.
+The Python firmware updater successfully transmitted the application binary to the STM32 bootloader. Firmware integrity was verified using CRC32 before application metadata was committed.
 
 ![Firmware Update Successful](images/firmware_update_success.jpeg)
 
-**2. Application Running on NUCLEO-F439ZI**
+### 2. Application Execution
 
 After firmware programming and verification, the STM32 successfully booted the application. LD1 was observed blinking at approximately one-second intervals.
 
 ![Application Running](images/application_running.jpeg)
 
-**3. Bootloader UART Communication**
+### 3. Bootloader UART Communication
 
 UART communication was verified through the ST-LINK Virtual COM Port using PuTTY.
 
 ![Bootloader UART Communication](images/bootloader_uart.png)
 
-### Interrupted Firmware Update Recovery Test
+## Invalid Packet & Reliability Test Results
+
+A total of **15 test cases** were executed against the STM32 bootloader using the Python test suite.
+
+**All 15 test cases successfully passed on hardware.**
+
+| Test Case | Validation | Result |
+|---|---|---|
+| TC01 | DATA_TRANSFER before START_UPDATE | PASS |
+| TC02 | Incorrect firmware offset | PASS |
+| TC03 | Unaligned firmware offset | PASS |
+| TC04 | Invalid DATA_TRANSFER payload lengths (4 and 133 bytes) | PASS |
+| TC05 | Firmware boundary validation | PASS |
+| TC06A | Identical duplicate packet acceptance | PASS |
+| TC06B | Modified duplicate packet rejection | PASS |
+| TC07 | DATA_TRANSFER after transfer completion | PASS |
+| TC08 | Out-of-sequence DATA_TRANSFER packet rejection | PASS |
+| TC09 | Invalid firmware sizes (zero and oversized) | PASS |
+| TC10 | Invalid firmware version | PASS |
+| TC11 | Invalid START_UPDATE payload lengths (8 and 13 bytes) | PASS |
+| TC12 | Invalid END_UPDATE payload lengths (1 and 4 bytes) | PASS |
+| TC13 | Unknown command ID rejection | PASS |
+| TC14 | Duplicate START_UPDATE rejection | PASS |
+| TC15 | Repeated END_UPDATE acknowledgement | PASS |
+
+The test suite includes subtests for payload lengths and firmware sizes. All tested conditions returned the expected ACK or NACK response.
+
+### TC01–TC05: Packet & Boundary Validation
+
+Validated DATA_TRANSFER rejection before an update, incorrect and unaligned offsets, invalid payload lengths, and firmware boundary protection.
+
+![TC01-TC05 Hardware Tests](images/test_cases_01_05.png)
+
+### TC06A–TC06B: Duplicate Packet Handling
+
+Verified that identical duplicate packets are acknowledged without repeated Flash programming, while modified duplicate packets are rejected.
+
+![TC06 Hardware Tests](images/test_cases_06A_06B.png)
+
+### TC07–TC08: Transfer Sequence Validation
+
+Verified rejection of additional firmware data after transfer completion and rejection of out-of-sequence firmware packets.
+
+![TC07-TC08 Hardware Tests](images/test_cases_07_08.png)
+
+### TC09–TC13: Invalid Input & Command Validation
+
+Validated firmware size, firmware version, command payload lengths, and unknown command handling.
+
+![TC09-TC13 Hardware Tests](images/test_cases_09_13.png)
+
+### TC14–TC15: Update State Validation
+
+Verified duplicate START_UPDATE rejection and successful acknowledgement of a repeated END_UPDATE request after successful firmware installation.
+
+![TC14-TC15 Hardware Tests](images/test_cases_14_15.png)
+
+## Interrupted Firmware Update Recovery Test
 
 A controlled interruption test was performed using `test_interrupted_update.py`.
 
@@ -293,13 +379,15 @@ The final GET_APP_INFO check reported:
 
 ```text
 Application Address: 0x08020000
+
 Application Status: VALID
+
 Firmware Version: 1.0.2
 ```
 
 This verifies that an interrupted update leaves the application invalid while keeping the bootloader available for a fresh update and recovery.
 
-### Firmware Version Management Test
+## Firmware Version Management Test
 
 | Firmware Version | Result |
 |---|---|
@@ -309,7 +397,7 @@ This verifies that an interrupted update leaves the application invalid while ke
 
 The GET_APP_INFO command reported the stored firmware version from STM32 Flash metadata. The Python updater transmits the firmware version as part of START_UPDATE, and the bootloader stores it after successful firmware CRC verification.
 
-### CRC Corruption & Recovery Hardware Test
+## CRC Corruption & Recovery Hardware Test
 
 A controlled corruption test was performed using the original application binary (6,112 bytes, expected CRC32 `0xF6213C40`).
 
@@ -325,6 +413,19 @@ A controlled corruption test was performed using the original application binary
 **Observed result:** The corrupted firmware was rejected, the bootloader remained available for recovery, and the original firmware was successfully restored.
 
 A standalone `test_crc_corruption.py` script was added for repeatable testing. Its Python syntax check passed; the hardware results above were obtained during the earlier manual fault-injection test.
+
+## Firmware Restoration & Recovery
+
+After completing the invalid packet, reliability, interrupted-update, and CRC corruption tests, the original application firmware was successfully restored using the normal Python firmware updater.
+
+- Original firmware size: 6,112 bytes.
+- CRC32: `0xF6213C40`.
+- Firmware transfer completed successfully.
+- Final CRC verification passed.
+- Application metadata was successfully programmed.
+- LD1 resumed blinking after a normal reset.
+
+![Firmware Restoration Successful](images/firmware_restoration.png)
 
 ## Software Requirements
 
@@ -350,13 +451,21 @@ Run the normal firmware updater from the `firmware_updater` directory:
 python main.py ..\uart_application\Debug\uart_application.bin
 ```
 
+Run the invalid packet test suite:
+
+```bash
+python test_invalid_packets.py
+```
+
 Run the dedicated CRC corruption test from the same directory:
 
 ```bash
 python test_crc_corruption.py ..\uart_application\Debug\uart_application.bin
 ```
 
-**Note:** The CRC corruption test intentionally invalidates the current application by starting an update and sending modified firmware data. After the test, use the normal `main.py` updater with the original, unmodified firmware binary to restore the application. Ensure the STM32 is in bootloader mode and the correct serial port is configured before initiating either operation. Close PuTTY or other serial terminal applications before running a script.
+**Note:** The CRC corruption test intentionally invalidates the current application by starting an update and sending modified firmware data. After the test, use the normal `main.py` updater with the original, unmodified firmware binary to restore the application.
+
+Ensure the STM32 is in bootloader mode and the correct serial port is configured before initiating an update. Close PuTTY or other serial terminal applications before running a script.
 
 ## Project Status
 
@@ -370,7 +479,7 @@ python test_crc_corruption.py ..\uart_application\Debug\uart_application.bin
 - Automatic application boot.
 - Hardware verification.
 
-### Phase 2 – UART Firmware Update: IMPLEMENTED & HARDWARE TESTED
+### Phase 2 – UART Firmware Update: COMPLETED & HARDWARE TESTED
 
 - UART communication protocol.
 - Firmware reception.
@@ -380,7 +489,7 @@ python test_crc_corruption.py ..\uart_application\Debug\uart_application.bin
 - Python-based firmware updater.
 - Automatic application boot after successful update.
 
-### Phase 3 – Reliability & Recovery: IN PROGRESS
+### Phase 3 – Reliability & Recovery: IMPLEMENTED & HARDWARE TESTED
 
 **Implemented and verified:**
 
@@ -388,20 +497,20 @@ python test_crc_corruption.py ..\uart_application\Debug\uart_application.bin
 - Duplicate packet acknowledgement without repeated Flash programming.
 - Firmware offset and packet boundary validation.
 - Repeated END_UPDATE request handling.
-- ACK timeout and retransmission handling in the Python updater.
 - Firmware version management and GET_APP_INFO reporting.
+- Invalid firmware size and version rejection.
+- Invalid command payload length rejection.
+- Unknown command ID rejection.
+- Duplicate START_UPDATE rejection.
 - Interrupted firmware update recovery, verified on hardware.
 - Recovery by reinstalling firmware after an interrupted update.
 - CRC corruption rejection and recovery, verified on hardware.
+- Complete 15-test invalid packet and reliability validation suite passed on hardware.
+
+**Additional development and validation:**
+
 - Dedicated CRC corruption test script added and Python syntax checked.
-
-**Remaining tests and improvements:**
-
-- Firmware compatibility checks.
-- Comprehensive packet-loss and retransmission testing.
-- Invalid packet and offset testing.
-- Improved UART synchronization and timeout handling.
-- Communication stress testing.
+- Standalone hardware execution of the CRC corruption script remains to be repeated.
 
 ## Future Improvements
 
@@ -410,11 +519,11 @@ python test_crc_corruption.py ..\uart_application\Debug\uart_application.bin
 - More comprehensive communication fault-injection testing.
 - Further UART synchronization and timeout improvements.
 - Communication stress testing.
+- More robust packet framing and recovery mechanisms.
 
 ## Author
 
 **Amrutha Pradeep**
 
-Electronics and Communication Engineering
-
+Electronics and Communication Engineering  
 Sardar Vallabhbhai National Institute of Technology (SVNIT), Surat
