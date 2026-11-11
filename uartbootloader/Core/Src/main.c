@@ -29,6 +29,15 @@
 #define SRAM_END     0x20030000U
 #define APP_END_ADDRESS  0x08200000U
 #define APP_MAX_SIZE     (APP_END_ADDRESS - APP_ADDRESS)
+
+/* Firmware Compatibility Configuration */
+
+#define FIRMWARE_HEADER_MAGIC          0x46574D47U
+#define FIRMWARE_HEADER_FORMAT_VERSION 1U
+
+#define HARDWARE_ID                     0xF4390001U
+
+#define BOOTLOADER_VERSION              0x00010000U
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -337,31 +346,61 @@ int main(void)
 	                {
 	                    SendBootloaderResponse(NACK);
 	                }
-	                else if (payloadLength != 12)
+	                else if (payloadLength != 28U)
 	                {
 	                    SendBootloaderResponse(NACK);
 	                }
 	                else
 	                {
-	                    expectedFirmwareSize =
+	                    uint32_t receivedHeaderMagic =
 	                        (uint32_t)rxBuffer[0] |
 	                        ((uint32_t)rxBuffer[1] << 8) |
 	                        ((uint32_t)rxBuffer[2] << 16) |
 	                        ((uint32_t)rxBuffer[3] << 24);
 
-	                    expectedFirmwareCRC =
+	                    uint32_t receivedHeaderFormat =
 	                        (uint32_t)rxBuffer[4] |
 	                        ((uint32_t)rxBuffer[5] << 8) |
 	                        ((uint32_t)rxBuffer[6] << 16) |
 	                        ((uint32_t)rxBuffer[7] << 24);
 
-	                    expectedFirmwareVersion =
+	                    uint32_t receivedHardwareID =
 	                        (uint32_t)rxBuffer[8] |
 	                        ((uint32_t)rxBuffer[9] << 8) |
 	                        ((uint32_t)rxBuffer[10] << 16) |
 	                        ((uint32_t)rxBuffer[11] << 24);
 
-	                    if ((expectedFirmwareSize == 0U) ||
+	                    uint32_t minimumBootloaderVersion =
+	                        (uint32_t)rxBuffer[12] |
+	                        ((uint32_t)rxBuffer[13] << 8) |
+	                        ((uint32_t)rxBuffer[14] << 16) |
+	                        ((uint32_t)rxBuffer[15] << 24);
+
+	                    expectedFirmwareSize =
+	                        (uint32_t)rxBuffer[16] |
+	                        ((uint32_t)rxBuffer[17] << 8) |
+	                        ((uint32_t)rxBuffer[18] << 16) |
+	                        ((uint32_t)rxBuffer[19] << 24);
+
+	                    expectedFirmwareCRC =
+	                        (uint32_t)rxBuffer[20] |
+	                        ((uint32_t)rxBuffer[21] << 8) |
+	                        ((uint32_t)rxBuffer[22] << 16) |
+	                        ((uint32_t)rxBuffer[23] << 24);
+
+	                    expectedFirmwareVersion =
+	                        (uint32_t)rxBuffer[24] |
+	                        ((uint32_t)rxBuffer[25] << 8) |
+	                        ((uint32_t)rxBuffer[26] << 16) |
+	                        ((uint32_t)rxBuffer[27] << 24);
+
+	                    /* Firmware compatibility validation */
+
+	                    if ((receivedHeaderMagic != FIRMWARE_HEADER_MAGIC) ||
+	                        (receivedHeaderFormat != FIRMWARE_HEADER_FORMAT_VERSION) ||
+	                        (receivedHardwareID != HARDWARE_ID) ||
+	                        (minimumBootloaderVersion > BOOTLOADER_VERSION) ||
+	                        (expectedFirmwareSize == 0U) ||
 	                        (expectedFirmwareSize > APP_MAX_SIZE) ||
 	                        (expectedFirmwareVersion == 0U))
 	                    {

@@ -1,8 +1,8 @@
 # STM32 UART Bootloader & Firmware Updater
 
-A custom UART-based bootloader for the **STM32F439ZI**, featuring firmware reception, Flash programming, CRC32 integrity verification, application metadata management, application validation, and automatic application booting.
+A custom UART-based bootloader for the **STM32F439ZI**, featuring firmware reception, Flash programming, CRC32 integrity verification, application metadata management, application validation, firmware compatibility checks, and automatic application booting.
 
-The project includes a Python-based firmware updater with packet handling, firmware version management, duplicate packet detection, and interrupted-update recovery.
+The project includes a Python-based firmware updater with packet handling, firmware version management, duplicate packet detection, interrupted-update recovery, and firmware compatibility validation.
 
 ## Project Structure
 
@@ -40,7 +40,8 @@ STM32-UART-Bootloader/
 │   ├── test_cases_06A_06B.png
 │   ├── test_cases_07_08.png
 │   ├── test_cases_09_13.png
-│   └── test_cases_14_15.png
+│   ├── test_cases_14_15.png
+│   └── test_cases_16_20.png
 │
 ├── .gitignore
 └── README.md
@@ -130,6 +131,15 @@ Communication between the Python updater and STM32 bootloader uses a custom pack
 - Valid marker programmed only after successful CRC verification.
 - Bootloader and metadata regions protected during application erasure.
 
+The application metadata contains:
+
+- Metadata magic number.
+- Firmware size.
+- Firmware CRC32.
+- Application valid marker.
+- Metadata format version.
+- Firmware version.
+
 ### 5. Firmware Integrity Verification
 
 - CRC32 calculation on both Python and STM32 sides.
@@ -147,6 +157,8 @@ Communication between the Python updater and STM32 bootloader uses a custom pack
 - Packet construction and transmission.
 - ACK/NACK response handling.
 - Firmware transfer progress monitoring and final verification.
+- Firmware compatibility header generation.
+- Extended response timeout handling for firmware update initiation and completion.
 
 ### 7. Firmware Transfer Reliability
 
@@ -206,66 +218,141 @@ A controlled fault-injection test was performed by modifying one byte of the fir
 - After reset, the bootloader stays active instead of jumping to the invalid application.
 - The original firmware was subsequently transferred successfully and application execution was restored.
 
-A separate `test_crc_corruption.py` script was added to reproduce the test without modifying the normal `main.py` updater. The script passed its Python syntax check; the hardware fault-injection results documented below were obtained during manual testing.
+A separate `test_crc_corruption.py` script was added to reproduce the test without modifying the normal `main.py` updater.
+
+**Testing note:** The script passed its Python syntax check. The documented hardware fault-injection results were obtained during manual testing; standalone hardware execution of the script remains to be repeated.
+
+### 12. Firmware Compatibility Validation
+
+A firmware compatibility mechanism was implemented to prevent firmware packages intended for incompatible hardware or bootloader versions from being installed.
+
+The compatibility information is transmitted through the START_UPDATE command rather than embedded at the beginning of the application binary.
+
+This preserves the application vector table at `0x08020000` and avoids requiring a change to the application linker address.
+
+**Firmware compatibility header:**
+
+The START_UPDATE payload was extended from 12 bytes to 28 bytes.
+
+| Field | Size | Example Value | Description |
+|---|---:|---|---|
+| Header Magic | 4 bytes | 0x46574D47 | Identifies a valid firmware header |
+| Header Format Version | 4 bytes | 1 | Identifies the header structure version |
+| Hardware ID | 4 bytes | 0xF4390001 | Identifies the target hardware |
+| Minimum Bootloader Version | 4 bytes | 0x00010000 | Minimum required bootloader version |
+| Firmware Size | 4 bytes | 6112 | Application binary size |
+| Firmware CRC32 | 4 bytes | 0xF6213C40 | Expected firmware CRC32 |
+| Firmware Version | 4 bytes | 0x00010002 | Application version 1.0.2 |
+
+**Total compatibility header size: 28 bytes.**
+
+**Compatibility validation performed by the STM32 bootloader:**
+
+1. Header magic number validation.
+2. Header format version validation.
+3. Hardware ID matching.
+4. Minimum bootloader version comparison.
+5. Firmware size validation.
+6. Firmware version validation.
+7. Firmware CRC32 verification after firmware transfer.
+
+The bootloader performs the compatibility checks before invalidating application metadata or erasing application Flash.
+
+If any compatibility check fails, the bootloader responds with NACK and rejects the update request.
+
+**Python implementation:**
+
+The Python updater constructs the 28-byte payload using:
+
+```python
+struct.pack(
+    "<IIIIIII",
+    header_magic,
+    header_format_version,
+    hardware_id,
+    minimum_bootloader_version,
+    firmware_size,
+    firmware_crc,
+    firmware_version
+)
+```
+
+The `<` format specifies little-endian byte order, while each `I` represents a 32-bit unsigned integer.
+
+**Compatibility configuration:**
+
+| Parameter | Current Configuration |
+|---|---|
+| Target Hardware | STM32F439ZI |
+| Hardware ID | 0xF4390001 |
+| Header Format Version | 1 |
+| Bootloader Version | 1.0.0 |
+| Example Minimum Bootloader Version | 1.0.0 |
+| Example Firmware Version | 1.0.2 |
+
+The hardware ID and bootloader version are currently compile-time configuration values. This approach can be extended to support additional STM32 boards and bootloader versions.
 
 ## Firmware Update Workflow
 
 ```text
-       Python Firmware Updater
-                 |
-                 v
-          Load Firmware BIN
-                 |
-                 v
-           Calculate CRC32
-                 |
-                 v
-          Connect via UART
-                 |
-                 v
-            START_UPDATE
-                 |
-                 v
-        Receive Firmware Version
-                 |
-                 v
-        Validate Firmware Size
-                 |
-                 v
-        Invalidate Metadata
-                 |
-                 v
-        Erase Application Flash
-                 |
-                 v
-           DATA_TRANSFER
-                 |
-                 v
-        Validate Packet Offset
-                 |
-                 v
-        Check Duplicate Packet
-                 |
-                 v
-        Program Application Flash
-                 |
-                 v
-            Send ACK / NACK
-                 |
-                 v
-             END_UPDATE
-                 |
-                 v
-            Verify CRC32
-                 |
-                 v
-            Write Metadata
-                 |
-                 v
-         Validate Application
-                 |
-                 v
-        Boot Application Firmware
+          Python Firmware Updater
+                    |
+                    v
+              Load Firmware BIN
+                    |
+                    v
+               Calculate CRC32
+                    |
+                    v
+            Construct 28-byte Header
+                    |
+                    v
+             Connect via UART
+                    |
+                    v
+               START_UPDATE
+                    |
+                    v
+         Validate Firmware Compatibility
+                    |
+                    v
+             Validate Firmware Size
+                    |
+                    v
+            Invalidate Metadata
+                    |
+                    v
+           Erase Application Flash
+                    |
+                    v
+              DATA_TRANSFER
+                    |
+                    v
+           Validate Packet Offset
+                    |
+                    v
+            Check Duplicate Packet
+                    |
+                    v
+          Program Application Flash
+                    |
+                    v
+               Send ACK / NACK
+                    |
+                    v
+                END_UPDATE
+                    |
+                    v
+              Verify CRC32
+                    |
+                    v
+              Write Metadata
+                    |
+                    v
+           Validate Application
+                    |
+                    v
+          Boot Application Firmware
 ```
 
 ## Hardware Validation & Testing
@@ -306,11 +393,11 @@ UART communication was verified through the ST-LINK Virtual COM Port using PuTTY
 
 ![Bootloader UART Communication](images/bootloader_uart.png)
 
-## Invalid Packet & Reliability Test Results
+## Invalid Packet, Reliability & Compatibility Test Results
 
-A total of **15 test cases** were executed against the STM32 bootloader using the Python test suite.
+A total of **20 named test cases** were implemented and executed against the STM32 bootloader using the Python test suite.
 
-**All 15 test cases successfully passed on hardware.**
+**All 20 named test cases successfully passed on hardware.**
 
 | Test Case | Validation | Result |
 |---|---|---|
@@ -325,13 +412,18 @@ A total of **15 test cases** were executed against the STM32 bootloader using th
 | TC08 | Out-of-sequence DATA_TRANSFER packet rejection | PASS |
 | TC09 | Invalid firmware sizes (zero and oversized) | PASS |
 | TC10 | Invalid firmware version | PASS |
-| TC11 | Invalid START_UPDATE payload lengths (8 and 13 bytes) | PASS |
+| TC11 | Invalid START_UPDATE payload lengths (27 and 29 bytes) | PASS |
 | TC12 | Invalid END_UPDATE payload lengths (1 and 4 bytes) | PASS |
 | TC13 | Unknown command ID rejection | PASS |
 | TC14 | Duplicate START_UPDATE rejection | PASS |
 | TC15 | Repeated END_UPDATE acknowledgement | PASS |
+| TC16 | Invalid firmware header magic | PASS |
+| TC17 | Unsupported firmware header format | PASS |
+| TC18 | Incorrect hardware ID | PASS |
+| TC19 | Minimum bootloader version too high | PASS |
+| TC20 | Valid firmware compatibility header acceptance | PASS |
 
-The test suite includes subtests for payload lengths and firmware sizes. All tested conditions returned the expected ACK or NACK response.
+The test suite includes additional subtests for payload lengths and firmware sizes. All tested conditions returned the expected ACK or NACK response.
 
 ### TC01–TC05: Packet & Boundary Validation
 
@@ -362,6 +454,20 @@ Validated firmware size, firmware version, command payload lengths, and unknown 
 Verified duplicate START_UPDATE rejection and successful acknowledgement of a repeated END_UPDATE request after successful firmware installation.
 
 ![TC14-TC15 Hardware Tests](images/test_cases_14_15.png)
+
+### TC16–TC20: Firmware Compatibility Validation
+
+Verified the new firmware compatibility header validation mechanism.
+
+- TC16: Incorrect header magic was rejected with NACK.
+- TC17: Unsupported header format was rejected with NACK.
+- TC18: Incorrect hardware ID was rejected with NACK.
+- TC19: An incompatible minimum bootloader version was rejected with NACK.
+- TC20: A valid firmware compatibility header was accepted with ACK.
+
+The valid-header test intentionally starts an update without transferring firmware. Application metadata is invalidated and application Flash is erased as part of the update process. The original firmware was subsequently restored successfully using the normal updater.
+
+![TC16-TC20 Firmware Compatibility Tests](images/test_cases_16_20.png)
 
 ## Interrupted Firmware Update Recovery Test
 
@@ -412,11 +518,11 @@ A controlled corruption test was performed using the original application binary
 
 **Observed result:** The corrupted firmware was rejected, the bootloader remained available for recovery, and the original firmware was successfully restored.
 
-A standalone `test_crc_corruption.py` script was added for repeatable testing. Its Python syntax check passed; the hardware results above were obtained during the earlier manual fault-injection test.
+A standalone `test_crc_corruption.py` script was added for repeatable testing. Its Python syntax check passed; the hardware results above were obtained during manual fault-injection testing.
 
 ## Firmware Restoration & Recovery
 
-After completing the invalid packet, reliability, interrupted-update, and CRC corruption tests, the original application firmware was successfully restored using the normal Python firmware updater.
+After completing the invalid packet, reliability, interrupted-update, CRC corruption, and compatibility tests, the original application firmware was successfully restored using the normal Python firmware updater.
 
 - Original firmware size: 6,112 bytes.
 - CRC32: `0xF6213C40`.
@@ -451,7 +557,7 @@ Run the normal firmware updater from the `firmware_updater` directory:
 python main.py ..\uart_application\Debug\uart_application.bin
 ```
 
-Run the invalid packet test suite:
+Run the invalid packet and compatibility test suite:
 
 ```bash
 python test_invalid_packets.py
@@ -463,7 +569,7 @@ Run the dedicated CRC corruption test from the same directory:
 python test_crc_corruption.py ..\uart_application\Debug\uart_application.bin
 ```
 
-**Note:** The CRC corruption test intentionally invalidates the current application by starting an update and sending modified firmware data. After the test, use the normal `main.py` updater with the original, unmodified firmware binary to restore the application.
+**Note:** The CRC corruption test intentionally invalidates the current application by starting an update and sending modified firmware data. TC20 also intentionally starts an update without transferring firmware. After either test, use the normal `main.py` updater with the original, unmodified firmware binary to restore the application.
 
 Ensure the STM32 is in bootloader mode and the correct serial port is configured before initiating an update. Close PuTTY or other serial terminal applications before running a script.
 
@@ -491,8 +597,6 @@ Ensure the STM32 is in bootloader mode and the correct serial port is configured
 
 ### Phase 3 – Reliability & Recovery: IMPLEMENTED & HARDWARE TESTED
 
-**Implemented and verified:**
-
 - Duplicate DATA packet detection.
 - Duplicate packet acknowledgement without repeated Flash programming.
 - Firmware offset and packet boundary validation.
@@ -507,7 +611,20 @@ Ensure the STM32 is in bootloader mode and the correct serial port is configured
 - CRC corruption rejection and recovery, verified on hardware.
 - Complete 15-test invalid packet and reliability validation suite passed on hardware.
 
-**Additional development and validation:**
+### Phase 4 – Firmware Compatibility Validation: COMPLETED & HARDWARE TESTED
+
+- 28-byte firmware compatibility header.
+- Header magic validation.
+- Header format version validation.
+- Hardware ID matching.
+- Minimum bootloader version validation.
+- Firmware size and version validation.
+- Valid compatibility header acceptance.
+- Invalid compatibility header rejection.
+- Five compatibility tests (TC16–TC20) passed on hardware.
+- Original application successfully restored after compatibility testing.
+
+### Additional Development
 
 - Dedicated CRC corruption test script added and Python syntax checked.
 - Standalone hardware execution of the CRC corruption script remains to be repeated.
@@ -515,15 +632,16 @@ Ensure the STM32 is in bootloader mode and the correct serial port is configured
 ## Future Improvements
 
 - Firmware authenticity and secure update mechanisms.
-- Firmware compatibility checks.
 - More comprehensive communication fault-injection testing.
-- Further UART synchronization and timeout improvements.
+- UART packet synchronization and resynchronization improvements.
+- More robust communication timeout and recovery mechanisms.
 - Communication stress testing.
-- More robust packet framing and recovery mechanisms.
+- Support for additional STM32 hardware targets.
 
 ## Author
 
 **Amrutha Pradeep**
 
-Electronics and Communication Engineering  
+Electronics and Communication Engineering
+
 Sardar Vallabhbhai National Institute of Technology (SVNIT), Surat

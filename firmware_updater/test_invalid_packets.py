@@ -12,6 +12,26 @@ from protocol import (
 import time
 import struct
 
+def build_test_compatibility_payload(
+    firmware_size=256,
+    firmware_crc=0,
+    firmware_version=0x01000002,
+    header_magic=0x46574D47,
+    header_format=1,
+    hardware_id=0xF4390001,
+    minimum_bootloader_version=0x00010000
+):
+    return struct.pack(
+        "<IIIIIII",
+        header_magic,
+        header_format,
+        hardware_id,
+        minimum_bootloader_version,
+        firmware_size,
+        firmware_crc,
+        firmware_version
+    )
+
 PORT = "COM3"
 BAUD_RATE = 115200
 
@@ -390,20 +410,12 @@ def test_invalid_firmware_size(serial_handler):
 
     print("\nTEST 9A: Zero firmware size")
 
-    firmware_version = 0x01000002
-
-    # Construct START_UPDATE with firmware size = 0
-    payload = struct.pack(
-        "<III",
-        0,
-        0,
-        firmware_version
+    payload = build_test_compatibility_payload(
+        firmware_size=0
     )
 
     packet = build_packet(CMD_START_UPDATE, payload)
-
     serial_handler.send(packet)
-
     response = serial_handler.receive_response()
 
     if response is False:
@@ -415,20 +427,12 @@ def test_invalid_firmware_size(serial_handler):
 
     print("\nTEST 9B: Firmware size exceeding maximum")
 
-    # APP_MAX_SIZE = 0x001E0000
-    oversized_firmware_size = 0x001E0001
-
-    payload = struct.pack(
-        "<III",
-        oversized_firmware_size,
-        0,
-        firmware_version
+    payload = build_test_compatibility_payload(
+        firmware_size=0x001E0001
     )
 
     packet = build_packet(CMD_START_UPDATE, payload)
-
     serial_handler.send(packet)
-
     response = serial_handler.receive_response()
 
     if response is False:
@@ -442,21 +446,12 @@ def test_invalid_firmware_version(serial_handler):
 
     print("\nTEST 10: Invalid firmware version")
 
-    firmware_size = 256
-    firmware_crc = 0
-    firmware_version = 0
-
-    payload = struct.pack(
-        "<III",
-        firmware_size,
-        firmware_crc,
-        firmware_version
+    payload = build_test_compatibility_payload(
+        firmware_version=0
     )
 
     packet = build_packet(CMD_START_UPDATE, payload)
-
     serial_handler.send(packet)
-
     response = serial_handler.receive_response()
 
     if response is False:
@@ -466,21 +461,19 @@ def test_invalid_firmware_version(serial_handler):
     else:
         print("[FAIL] No valid response received.")
 
+
 def test_invalid_start_payload_length(serial_handler):
 
     print("\nTEST 11A: START_UPDATE payload too short")
 
-    # Send START_UPDATE with only 8 bytes
-    payload = bytes([0x00] * 8)
+    payload = bytes([0x00] * 27)
 
     packet = build_packet(CMD_START_UPDATE, payload)
-
     serial_handler.send(packet)
-
     response = serial_handler.receive_response()
 
     if response is False:
-        print("[PASS] Bootloader rejected 8-byte payload.")
+        print("[PASS] Bootloader rejected 27-byte payload.")
     elif response is True:
         print("[FAIL] Bootloader accepted invalid payload.")
     else:
@@ -488,17 +481,14 @@ def test_invalid_start_payload_length(serial_handler):
 
     print("\nTEST 11B: START_UPDATE payload too long")
 
-    # Send START_UPDATE with 13 bytes
-    payload = bytes([0x00] * 13)
+    payload = bytes([0x00] * 29)
 
     packet = build_packet(CMD_START_UPDATE, payload)
-
     serial_handler.send(packet)
-
     response = serial_handler.receive_response()
 
     if response is False:
-        print("[PASS] Bootloader rejected 13-byte payload.")
+        print("[PASS] Bootloader rejected 29-byte payload.")
     elif response is True:
         print("[FAIL] Bootloader accepted invalid payload.")
     else:
@@ -678,6 +668,106 @@ def wait_for_board_reset(message, serial_handler):
     print("[INFO] UART receive buffer cleared.")
     print("=" * 55)
 
+def test_invalid_header_magic(serial_handler):
+
+    print("\nTEST 16: Invalid firmware header magic")
+
+    payload = build_test_compatibility_payload(
+        header_magic=0x12345678
+    )
+
+    packet = build_packet(CMD_START_UPDATE, payload)
+    serial_handler.send(packet)
+    response = serial_handler.receive_response()
+
+    if response is False:
+        print("[PASS] Bootloader rejected invalid header magic.")
+    elif response is True:
+        print("[FAIL] Bootloader accepted invalid header magic.")
+    else:
+        print("[FAIL] No valid response received.")
+
+
+def test_invalid_header_format(serial_handler):
+
+    print("\nTEST 17: Unsupported header format")
+
+    payload = build_test_compatibility_payload(
+        header_format=2
+    )
+
+    packet = build_packet(CMD_START_UPDATE, payload)
+    serial_handler.send(packet)
+    response = serial_handler.receive_response()
+
+    if response is False:
+        print("[PASS] Bootloader rejected unsupported header format.")
+    elif response is True:
+        print("[FAIL] Bootloader accepted unsupported header format.")
+    else:
+        print("[FAIL] No valid response received.")
+
+
+def test_invalid_hardware_id(serial_handler):
+
+    print("\nTEST 18: Incorrect hardware ID")
+
+    payload = build_test_compatibility_payload(
+        hardware_id=0xF4390002
+    )
+
+    packet = build_packet(CMD_START_UPDATE, payload)
+    serial_handler.send(packet)
+    response = serial_handler.receive_response()
+
+    if response is False:
+        print("[PASS] Bootloader rejected incompatible hardware ID.")
+    elif response is True:
+        print("[FAIL] Bootloader accepted incompatible hardware ID.")
+    else:
+        print("[FAIL] No valid response received.")
+
+
+def test_incompatible_bootloader_version(serial_handler):
+
+    print("\nTEST 19: Minimum bootloader version too high")
+
+    payload = build_test_compatibility_payload(
+        minimum_bootloader_version=0x00020000
+    )
+
+    packet = build_packet(CMD_START_UPDATE, payload)
+    serial_handler.send(packet)
+    response = serial_handler.receive_response()
+
+    if response is False:
+        print("[PASS] Bootloader rejected incompatible firmware.")
+    elif response is True:
+        print("[FAIL] Bootloader accepted incompatible firmware.")
+    else:
+        print("[FAIL] No valid response received.")
+
+def test_valid_compatibility_header(serial_handler):
+
+    print("\nTEST 20: Valid firmware compatibility header")
+
+    payload = build_test_compatibility_payload()
+
+    packet = build_packet(CMD_START_UPDATE, payload)
+    serial_handler.send(packet)
+    response = serial_handler.receive_start_response()
+
+    if response is True:
+        print("[PASS] Bootloader accepted compatible firmware.")
+
+        # Abort the test update without sending firmware data.
+        # Application metadata has already been invalidated,
+        # so the previous application is no longer bootable.
+        print("[INFO] Test update started. Reset the board to exit.")
+    elif response is False:
+        print("[FAIL] Bootloader rejected compatible firmware.")
+    else:
+        print("[FAIL] No valid response received.")
 
 def main():
 
@@ -752,10 +842,26 @@ def main():
         print("\n\n========== GROUP 8: TC15 ==========")
         test_repeated_end_update(serial_handler)
 
+        # GROUP 9: TC16 - TC20
+        wait_for_board_reset("Prepare for TC16 - TC20", serial_handler)
+
+        print("\n\n========== GROUP 9: FIRMWARE COMPATIBILITY ==========")
+
+        test_invalid_header_magic(serial_handler)
+        test_invalid_header_format(serial_handler)
+        test_invalid_hardware_id(serial_handler)
+        test_incompatible_bootloader_version(serial_handler)
+
+        print("\n[INFO] All compatibility rejection tests completed.")
+
+        print("\n\n========== TC20: VALID COMPATIBILITY HEADER ==========")
+
+        test_valid_compatibility_header(serial_handler)
+
         print("\n\n========== TEST SUITE FINISHED ==========")
         print("Review the PASS/FAIL results above.")
-        print("Restore the original application firmware before normal use.")
-
+        print("[WARNING] TC20 invalidated application metadata.")
+        print("[INFO] Restore the original application firmware before normal use.")
     finally:
         serial_handler.disconnect()
 

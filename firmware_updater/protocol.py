@@ -49,20 +49,20 @@ def calculate_crc32(firmware_data):
 
 
 def build_start_update_packet(firmware_data, firmware_version):
-    """
-    Construct START_UPDATE packet.
-
-    Payload:
-    Firmware Size (4 bytes)
-    Expected CRC32 (4 bytes)
-    Firmware Version (4 bytes)
-    """
-
     firmware_size = len(firmware_data)
     firmware_crc = calculate_crc32(firmware_data)
 
+    header_magic = 0x46574D47
+    header_format_version = 1
+    hardware_id = 0xF4390001
+    minimum_bootloader_version = 0x00010000
+
     payload = struct.pack(
-        "<III",
+        "<IIIIIII",
+        header_magic,
+        header_format_version,
+        hardware_id,
+        minimum_bootloader_version,
         firmware_size,
         firmware_crc,
         firmware_version
